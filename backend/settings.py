@@ -4,6 +4,7 @@ import dj_database_url
 from dotenv import load_dotenv
 import re
 
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 env_path = BASE_DIR / '.env'
 load_dotenv(dotenv_path=env_path)
@@ -76,13 +77,11 @@ WSGI_APPLICATION = "backend.wsgi.application"
 # ==========================================
 
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'kariem$rawasidb',
-        'USER': 'kariem',
-        'PASSWORD': 'Kar752001@',
-        'HOST': 'kariem.mysql.pythonanywhere-services.com',
-    }
+    'default': dj_database_url.config(
+        default=os.environ.get('DATABASE_URL', 'sqlite:///db.sqlite3'),
+        conn_max_age=600,
+        conn_health_checks=True,
+    )
 }
 DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True
 # FIX #3: Redis للـ Production، LocMemCache فقط للـ Development
