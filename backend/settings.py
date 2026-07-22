@@ -16,7 +16,7 @@ SECRET_KEY = os.environ["SECRET_KEY"]
 DEBUG = os.environ.get("DEBUG", "False") == "True"
 
 # FIX #2: ALLOWED_HOSTS تعريف واحد فقط من ENV
-ALLOWED_HOSTS = ['kariem.pythonanywhere.com', 'www.kariem.pythonanywhere.com', '127.0.0.1', 'localhost', '*']
+ALLOWED_HOSTS = ['127.0.0.1', 'localhost', '*']
 # ==========================================
 # 2. التطبيقات والوسائط (Apps & Middleware)
 # ==========================================
