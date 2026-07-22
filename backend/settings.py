@@ -214,8 +214,15 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 # ==========================================
 # 6. الملفات والصور (Static & Media)
 # ==========================================
-STATIC_URL = "/static/"
-STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
+import os
+
+STATIC_URL = '/static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+
+# دي المسارات اللي دجانجو بيدور فيها على ملفات التصميم عندك
+#STATICFILES_DIRS = [
+#    os.path.join(BASE_DIR, 'static'), # لو عندك فولدر static رئيسي
+#]
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")
