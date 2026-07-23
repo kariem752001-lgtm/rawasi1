@@ -3,12 +3,16 @@ import pusher
 from django.conf import settings
 from rest_framework.exceptions import ValidationError
 
-# تجهيز اتصال Pusher من إعدادات دجانجو
+app_id = getattr(settings, 'PUSHER_APP_ID', None) or 'dummy_app_id'
+key = getattr(settings, 'PUSHER_KEY', None) or 'dummy_key'
+secret = getattr(settings, 'PUSHER_SECRET', None) or 'dummy_secret'
+cluster = getattr(settings, 'PUSHER_CLUSTER', 'eu')
+
 pusher_client = pusher.Pusher(
-    app_id=getattr(settings, 'PUSHER_APP_ID', ''),
-    key=getattr(settings, 'PUSHER_KEY', ''),
-    secret=getattr(settings, 'PUSHER_SECRET', ''),
-    cluster=getattr(settings, 'PUSHER_CLUSTER', 'eu'),
+    app_id=app_id,
+    key=key,
+    secret=secret,
+    cluster=cluster,
     ssl=True
 )
 

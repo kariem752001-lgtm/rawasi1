@@ -13,7 +13,7 @@ urlpatterns = [
     path("api/auth/", include("djoser.urls")),
     path("api/auth/", include("djoser.urls.authtoken")),
     path("api/auth/", include("aqar_core.urls")),
-
+    path('api/chat/', include('chat.urls')),
     # لوحة التحكم
     path("admin/", admin.site.urls),
 
