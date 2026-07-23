@@ -17,7 +17,7 @@ SECRET_KEY = os.environ["SECRET_KEY"]
 DEBUG = os.environ.get("DEBUG", "False") == "True"
 
 # FIX #2: ALLOWED_HOSTS تعريف واحد فقط من ENV
-ALLOWED_HOSTS = ['127.0.0.1', 'localhost', '*']
+ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") 
 # ==========================================
 # 2. التطبيقات والوسائط (Apps & Middleware)
 # ==========================================
