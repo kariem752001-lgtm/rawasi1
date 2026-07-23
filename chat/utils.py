@@ -3,7 +3,7 @@ import pusher
 from django.conf import settings
 from rest_framework.exceptions import ValidationError
 
-app_id = getattr(settings, 'PUSHER_APP_ID', None) or 'dummy_app_id'
+app_id = getattr(settings, 'PUSHER_APP_ID', None) or '1234567'
 key = getattr(settings, 'PUSHER_KEY', None) or 'dummy_key'
 secret = getattr(settings, 'PUSHER_SECRET', None) or 'dummy_secret'
 cluster = getattr(settings, 'PUSHER_CLUSTER', 'eu')
