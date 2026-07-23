@@ -97,8 +97,8 @@ class Listing(BaseModel):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Pending', db_index=True)    
     is_finance_eligible = models.BooleanField(default=False)
 
-    thumbnail = models.ImageField(upload_to='listings_thumbnails/', null=True, blank=True)
-    
+    thumbnail = models.ImageField(upload_to='listings_thumbnails/', max_length=500, null=True, blank=True)
+
     # ✅ تم فصل ملف الفيديو لعدم استهلاك مساحة إذا تم الرفع لليوتيوب
     video = models.FileField(upload_to='listings_videos/', storage=VideoMediaCloudinaryStorage(), null=True, blank=True)   
     youtube_url = models.URLField(null=True, blank=True, verbose_name="رابط فيديو يوتيوب")
