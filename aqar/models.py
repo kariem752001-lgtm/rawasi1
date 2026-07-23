@@ -133,8 +133,7 @@ class ListingFeature(models.Model):
 
 class ListingImage(models.Model):
     listing = models.ForeignKey(Listing, on_delete=models.CASCADE, related_name='images')
-    image = models.ImageField(upload_to='listings_photos/')
-    
+    image = models.ImageField(upload_to='listings_photos/', max_length=500)    
     def save(self, *args, **kwargs):
         # شلنا كود الضغط من هنا
         super().save(*args, **kwargs)
