@@ -30,7 +30,9 @@ class StartOrGetChatRoomView(generics.GenericAPIView):
     def post(self, request, listing_id):
         listing = get_object_or_404(Listing, id=listing_id)
         buyer = request.user
-        seller = listing.owner # ⚠️ غيّر كلمة owner لاسم حقل اليوزر في موديل الإعلانات عندك لو مختلف
+        seller = listing.agent
+        if not seller:
+            return Response({"detail": "هذا الإعلان غير مرتبط بمالك محدد."}, status=status.HTTP_400_BAD_REQUEST) # ⚠️ غيّر كلمة owner لاسم حقل اليوزر في موديل الإعلانات عندك لو مختلف
 
         if buyer == seller:
             return Response({"detail": "لا يمكنك بدء محادثة مع نفسك!"}, status=status.HTTP_400_BAD_REQUEST)
