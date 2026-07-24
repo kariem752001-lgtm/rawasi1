@@ -28,11 +28,12 @@ class ChatRoomSerializer(serializers.ModelSerializer):
     listing_title = serializers.CharField(source='listing.title', read_only=True)
     other_user = serializers.SerializerMethodField()
     last_message = serializers.SerializerMethodField()
+    unread_count = serializers.SerializerMethodField() 
 
     class Meta:
         model = ChatRoom
-        fields = ['id', 'listing', 'listing_title', 'other_user', 'last_message', 'updated_at']
-
+        # 🚀 ضيفي الحقل في הـ fields
+        fields = ['id', 'listing', 'listing_title', 'other_user', 'last_message', 'unread_count', 'updated_at']
     def get_other_user(self, obj):
         # بنرجع بيانات الطرف التاني في المحادثة
         request = self.context.get('request')
@@ -55,3 +56,10 @@ class ChatRoomSerializer(serializers.ModelSerializer):
                 'is_read': last_msg.is_read
             }
         return None
+
+    def get_unread_count(self, obj):
+        request = self.context.get('request')
+        if not request:
+            return 0
+        # بيعد الرسايل اللي في الغرفة دي، مبعوتة من الطرف التاني، ولسه متقرتش
+        return obj.messages.exclude(sender=request.user).filter(is_read=False).count()

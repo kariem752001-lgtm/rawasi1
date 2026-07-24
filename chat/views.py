@@ -10,16 +10,16 @@ from aqar.models import Listing  # تأكد من المسار
 from rest_framework.views import APIView
 
 class ChatRoomListView(generics.ListAPIView):
-    """
-    جلب كل المحادثات الخاصة بالمستخدم (سواء كان بائع أو مشتري)
-    """
     serializer_class = ChatRoomSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         user = self.request.user
-        return ChatRoom.objects.filter(Q(buyer=user) | Q(seller=user))
-
+        # 🚀 ضفنا prefetch عشان الباك إند ميستهلكش موارد السيرفر
+        return ChatRoom.objects.filter(
+            Q(buyer=user) | Q(seller=user)
+        ).select_related('listing', 'buyer', 'seller').prefetch_related('messages')
+        
 
 class StartOrGetChatRoomView(generics.GenericAPIView):
     """
@@ -45,9 +45,6 @@ class StartOrGetChatRoomView(generics.GenericAPIView):
 
 
 class MessageListCreateView(generics.ListCreateAPIView):
-    """
-    جلب رسائل غرفة معينة وإرسال رسالة جديدة (مع تفعيل Pusher)
-    """
     serializer_class = MessageSerializer
     permission_classes = [IsAuthenticated]
 
@@ -58,24 +55,30 @@ class MessageListCreateView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         room = get_object_or_404(ChatRoom, id=self.kwargs['room_id'])
         
-        # 1. حفظ الرسالة في قاعدة البيانات
+        # 1. حفظ الرسالة
         message = serializer.save(sender=self.request.user, room=room)
         
-        # تحديث وقت الغرفة عشان تطلع فوق في القائمة
+        # تحديث وقت الغرفة
         room.updated_at = message.created_at
         room.save()
 
-        # 2. إرسال الرسالة عبر Pusher (السحر اللحظي ✨)
+        # 2. إرسال الرسالة للغرفة (عشان اللي فاتح الشات)
         channel_name = f'private-chat_{room.id}'
         event_name = 'new_message'
-        
-        # بنجهز شكل الداتا اللي هتروح للفرونت إند
         data = MessageSerializer(message, context={'request': self.request}).data
         
+        # 🚀 تحديد الطرف الآخر (المستلم) عشان نبعتله إشعار عام
+        receiver = room.seller if self.request.user == room.buyer else room.buyer
+
         try:
             pusher_client.trigger(channel_name, event_name, data)
+            
+            # 🚀 3. إرسال إشعار لحظي للقناة العامة بتاعت المستلم (عشان العداد ينور في الـ Navbar)
+            if receiver:
+                global_channel = f'private-user_{receiver.id}'
+                pusher_client.trigger(global_channel, 'new_message_notification', data)
+                
         except Exception as e:
-            # لو Pusher فيه مشكلة، الرسالة اتحفظت خلاص بس بنطبع الخطأ عشان نعرفه
             print(f"Pusher Error: {e}")
 
 class MarkMessagesAsReadView(APIView):
@@ -111,34 +114,56 @@ class MarkMessagesAsReadView(APIView):
         return Response({"detail": "تم تحديث حالة القراءة", "updated_count": updated_count}, status=status.HTTP_200_OK)
 
 class PusherAuthView(APIView):
-    """
-    التصريح للفرونت إند بالاستماع لقنوات Pusher الخاصة
-    """
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        # Pusher بيبعت المتغيرين دول أوتوماتيك من الفرونت إند
         channel_name = request.data.get('channel_name')
         socket_id = request.data.get('socket_id')
 
         if not channel_name or not socket_id:
             return Response({"detail": "بيانات ناقصة"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # هنتأكد إن القناة دي تابعة للشات بتاعنا
+        # 🚀 فحص تصريح غرفة الشات
         if channel_name.startswith('private-chat_'):
-            # بنستخرج رقم الغرفة من اسم القناة (مثلاً private-chat_15)
             room_id = channel_name.split('private-chat_')[1]
             room = get_object_or_404(ChatRoom, id=room_id)
-
-            # 🚨 الأمان الحقيقي: هل اليوزر ده هو البائع أو المشتري في الغرفة دي؟
             if request.user not in [room.buyer, room.seller]:
                 return Response({"detail": "غير مصرح لك بدخول هذه الغرفة!"}, status=status.HTTP_403_FORBIDDEN)
+                
+        # 🚀 فحص تصريح القناة العامة لليوزر (لإشعارات الـ Navbar)
+        elif channel_name.startswith('private-user_'):
+            user_id = channel_name.split('private-user_')[1]
+            if str(request.user.id) != str(user_id):
+                return Response({"detail": "غير مصرح لك بالاستماع لإشعارات مستخدم آخر!"}, status=status.HTTP_403_FORBIDDEN)
+        
+        else:
+            return Response({"detail": "قناة غير صالحة"}, status=status.HTTP_400_BAD_REQUEST)
 
-            # لو هو فعلاً طرف في المحادثة، هنمضي الطلب ونرجعله التصريح المشفر
-            auth = pusher_client.authenticate(
-                channel=channel_name,
-                socket_id=socket_id
-            )
-            return Response(auth, status=status.HTTP_200_OK)
+        # لو كل حاجة تمام، نمضي الطلب
+        auth = pusher_client.authenticate(
+            channel=channel_name,
+            socket_id=socket_id
+        )
+        return Response(auth, status=status.HTTP_200_OK)
 
-        return Response({"detail": "قناة غير صالحة"}, status=status.HTTP_400_BAD_REQUEST)
+
+# 🚀 الكلاس الجديد اللي هيحل مشكلة الـ 404 (ضيفيه في آخر الملف)
+class UnreadMessageCountView(APIView):
+    """
+    إرجاع عدد الرسائل غير المقروءة للمستخدم لعرضها في شريط التنقل (Navbar)
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        
+        # بنجيب كل الغرف اللي اليوزر طرف فيها
+        rooms = ChatRoom.objects.filter(Q(buyer=user) | Q(seller=user))
+        
+        # بنعد كل الرسايل اللي في الغرف دي، بشرط إنها تكون مش مقروءة ومبعوتة من حد تاني
+        unread_count = Message.objects.filter(
+            room__in=rooms, 
+            is_read=False
+        ).exclude(sender=user).count()
+
+        return Response({"unread_count": unread_count}, status=status.HTTP_200_OK)
