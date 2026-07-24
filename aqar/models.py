@@ -71,8 +71,7 @@ class Listing(BaseModel):
     price = models.DecimalField(max_digits=15, decimal_places=2, db_index=True)
     area_sqm = models.IntegerField(db_index=True)
     description = models.TextField()
-    custom_map_image = models.ImageField(upload_to='listings_maps/', null=True, blank=True)
-    
+    custom_map_image = models.ImageField(upload_to='listings_maps/', max_length=500, null=True, blank=True)    
     bedrooms = models.IntegerField(null=True, blank=True)
     bathrooms = models.IntegerField(null=True, blank=True)
     floor_number = models.IntegerField(null=True, blank=True)
@@ -100,11 +99,11 @@ class Listing(BaseModel):
     thumbnail = models.ImageField(upload_to='listings_thumbnails/', max_length=500, null=True, blank=True)
 
     # ✅ تم فصل ملف الفيديو لعدم استهلاك مساحة إذا تم الرفع لليوتيوب
-    video = models.FileField(upload_to='listings_videos/', storage=VideoMediaCloudinaryStorage(), null=True, blank=True)   
+    video = models.FileField(upload_to='listings_videos/', storage=VideoMediaCloudinaryStorage(), max_length=500, null=True, blank=True)   
     youtube_url = models.URLField(null=True, blank=True, verbose_name="رابط فيديو يوتيوب")
     
-    id_card_image = models.ImageField(upload_to='secure_docs/', null=True, blank=True)
-    contract_image = models.ImageField(upload_to='secure_docs/', null=True, blank=True)
+    id_card_image = models.ImageField(upload_to='secure_docs/', max_length=500, null=True, blank=True)   
+    contract_image = models.ImageField(upload_to='secure_docs/', max_length=500, null=True, blank=True)
     owner_name = models.CharField(max_length=100, null=True, blank=True)
     owner_phone = models.CharField(max_length=20, null=True, blank=True)
 
