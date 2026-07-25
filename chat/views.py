@@ -30,7 +30,7 @@ class StartOrGetChatRoomView(generics.GenericAPIView):
         if not seller:
             return Response({"detail": "هذا الإعلان غير مرتبط بمالك محدد."}, status=status.HTTP_400_BAD_REQUEST)
 
-        if buyer.id == seller.id:
+        if str(buyer.id) == str(seller.id):
             return Response({"detail": "لا يمكنك بدء محادثة مع نفسك!"}, status=status.HTTP_400_BAD_REQUEST)
 
         room, created = ChatRoom.objects.get_or_create(
@@ -53,10 +53,8 @@ class MessageListCreateView(generics.ListCreateAPIView):
         queryset = self.filter_queryset(self.get_queryset())
         serializer = self.get_serializer(queryset, many=True)
         data = serializer.data
-        
         for msg in data:
             msg['is_me'] = str(msg.get('sender')) == str(request.user.id)
-            
         return Response(data)
 
     def perform_create(self, serializer):
@@ -73,12 +71,16 @@ class MessageListCreateView(generics.ListCreateAPIView):
             'content': message.content,
             'created_at': message.created_at.isoformat(),
             'is_read': message.is_read,
-            'is_delivered': message.is_delivered,
+            'is_delivered': getattr(message, 'is_delivered', False), # تأمين لو الحقل مش موجود
             'sender': self.request.user.id 
         }
         
-        # 🚀 إصلاح الفخ: استخدام .id في المقارنة لضمان تحديد المستلم الصحيح
-        receiver = room.seller if self.request.user.id == room.buyer.id else room.buyer
+        # 🚀 تأمين مقارنة الـ IDs بتحويلهم لنصوص عشان ميفوتش المستلم
+        current_id = str(self.request.user.id)
+        buyer_id = str(room.buyer.id)
+        receiver = room.seller if current_id == buyer_id else room.buyer
+
+        print(f"🔥 DEBUG BACKEND: Sender={current_id}, Receiver={receiver.id}")
 
         try:
             pusher_client.trigger(channel_name, 'new_message', data)
@@ -88,6 +90,7 @@ class MessageListCreateView(generics.ListCreateAPIView):
         if receiver:
             try:
                 global_channel = f'private-user_{receiver.id}'
+                print(f"🔥 DEBUG BACKEND: Triggering Notification to {global_channel}")
                 pusher_client.trigger(global_channel, 'new_message_notification', data)
             except Exception as e:
                 print(f"Pusher Global Error: {e}")
@@ -99,7 +102,7 @@ class MarkMessagesAsReadView(APIView):
     def post(self, request, room_id):
         room = get_object_or_404(ChatRoom, id=room_id)
         
-        if request.user.id not in [room.buyer.id, room.seller.id]:
+        if str(request.user.id) not in [str(room.buyer.id), str(room.seller.id)]:
             return Response({"detail": "غير مصرح لك"}, status=status.HTTP_403_FORBIDDEN)
 
         unread_messages = room.messages.exclude(sender=request.user).filter(is_read=False)
@@ -110,9 +113,9 @@ class MarkMessagesAsReadView(APIView):
             try:
                 pusher_client.trigger(channel_name, 'messages_read', {'read_by': request.user.id})
             except Exception as e:
-                print(f"Pusher Error: {e}")
+                pass
 
-        return Response({"detail": "تم تحديث حالة القراءة", "updated_count": updated_count}, status=status.HTTP_200_OK)
+        return Response({"detail": "تم", "updated_count": updated_count}, status=status.HTTP_200_OK)
 
 
 class MarkMessageAsDeliveredView(APIView):
@@ -121,16 +124,19 @@ class MarkMessageAsDeliveredView(APIView):
     def post(self, request, message_id):
         message = get_object_or_404(Message, id=message_id)
         
-        # 🚀 إصلاح الفخ 2: استخدام sender_id بدلاً من الكائن نفسه
-        if message.sender_id != request.user.id and not message.is_delivered:
-            message.is_delivered = True
-            message.save(update_fields=['is_delivered']) # تسريع قواعد البيانات
-            
-            channel_name = f'private-chat_{message.room.id}'
-            try:
-                pusher_client.trigger(channel_name, 'message_delivered', {'message_id': message.id})
-            except Exception as e:
-                print(f"Pusher Error: {e}")
+        if str(message.sender_id) != str(request.user.id):
+            if hasattr(message, 'is_delivered') and not message.is_delivered:
+                message.is_delivered = True
+                message.save(update_fields=['is_delivered'])
+                
+                channel_name = f'private-chat_{message.room.id}'
+                try:
+                    pusher_client.trigger(channel_name, 'message_delivered', {'message_id': message.id})
+                    print(f"🔥 DEBUG BACKEND: Delivered event sent to {channel_name}")
+                except Exception as e:
+                    print(f"Pusher Error: {e}")
+            else:
+                 print("🔥 DEBUG BACKEND: is_delivered not found in DB or already delivered")
                 
         return Response({"detail": "Delivered"}, status=status.HTTP_200_OK)
 
@@ -151,21 +157,16 @@ class PusherAuthView(APIView):
         if channel_name.startswith('private-chat_'):
             room_id = channel_name.split('private-chat_')[1]
             room = get_object_or_404(ChatRoom, id=room_id)
-            if request.user.id not in [room.buyer_id, room.seller_id]:
-                return Response({"detail": "غير مصرح لك بدخول هذه الغرفة!"}, status=status.HTTP_403_FORBIDDEN)
+            if str(request.user.id) not in [str(room.buyer_id), str(room.seller_id)]:
+                return Response({"detail": "غير مصرح"}, status=status.HTTP_403_FORBIDDEN)
                 
         elif channel_name.startswith('private-user_'):
             user_id = channel_name.split('private-user_')[1]
             if str(request.user.id) != str(user_id):
-                return Response({"detail": "غير مصرح لك بالاستماع لإشعارات مستخدم آخر!"}, status=status.HTTP_403_FORBIDDEN)
-        else:
-            return Response({"detail": "قناة غير صالحة"}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"detail": "غير مصرح"}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            auth = pusher_client.authenticate(
-                channel=channel_name,
-                socket_id=socket_id
-            )
+            auth = pusher_client.authenticate(channel=channel_name, socket_id=socket_id)
             return Response(auth, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -177,10 +178,5 @@ class UnreadMessageCountView(APIView):
     def get(self, request):
         user = request.user
         rooms = ChatRoom.objects.filter(Q(buyer=user) | Q(seller=user))
-        
-        unread_count = Message.objects.filter(
-            room__in=rooms, 
-            is_read=False
-        ).exclude(sender=user).count()
-
+        unread_count = Message.objects.filter(room__in=rooms, is_read=False).exclude(sender=user).count()
         return Response({"unread_count": unread_count}, status=status.HTTP_200_OK)
