@@ -6,7 +6,7 @@ from django.shortcuts import get_object_or_404
 from .models import ChatRoom, Message
 from .serializers import ChatRoomSerializer, MessageSerializer
 from .utils import pusher_client
-from aqar.models import Listing  # تأكد من المسار
+from aqar.models import Listing  
 from rest_framework.views import APIView
 
 class ChatRoomListView(generics.ListAPIView):
@@ -113,19 +113,16 @@ class MarkMessagesAsReadView(APIView):
         return Response({"detail": "تم تحديث حالة القراءة", "updated_count": updated_count}, status=status.HTTP_200_OK)
 
 
-# 🚀 الكلاس الجديد لإثبات وصول الرسالة للموبايل (Delivered)
 class MarkMessageAsDeliveredView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, message_id):
         message = get_object_or_404(Message, id=message_id)
         
-        # نتأكد إن الرسالة مش بتاعتي، وإنها لسه متعلمتش كـ Delivered
         if message.sender != request.user and not message.is_delivered:
             message.is_delivered = True
             message.save()
             
-            # نبلغ المرسل إن رسالته وصلت جهاز المستلم (عشان يرسم صحين رمادي)
             channel_name = f'private-chat_{message.room.id}'
             try:
                 pusher_client.trigger(channel_name, 'message_delivered', {'message_id': message.id})
@@ -145,6 +142,10 @@ class PusherAuthView(APIView):
         if not channel_name or not socket_id:
             return Response({"detail": "بيانات ناقصة"}, status=status.HTTP_400_BAD_REQUEST)
 
+        # 🚀 الحماية المطلقة ضد إيرور 403 اللي كان بيطلعلك
+        if 'undefined' in channel_name or 'null' in channel_name:
+            return Response({"detail": "قناة غير صالحة بسبب غياب الـ ID"}, status=status.HTTP_400_BAD_REQUEST)
+
         if channel_name.startswith('private-chat_'):
             room_id = channel_name.split('private-chat_')[1]
             room = get_object_or_404(ChatRoom, id=room_id)
@@ -158,11 +159,14 @@ class PusherAuthView(APIView):
         else:
             return Response({"detail": "قناة غير صالحة"}, status=status.HTTP_400_BAD_REQUEST)
 
-        auth = pusher_client.authenticate(
-            channel=channel_name,
-            socket_id=socket_id
-        )
-        return Response(auth, status=status.HTTP_200_OK)
+        try:
+            auth = pusher_client.authenticate(
+                channel=channel_name,
+                socket_id=socket_id
+            )
+            return Response(auth, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class UnreadMessageCountView(APIView):
