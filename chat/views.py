@@ -80,13 +80,19 @@ class MessageListCreateView(generics.ListCreateAPIView):
         
         receiver = room.seller if self.request.user == room.buyer else room.buyer
 
+        # 🚀 1. إرسال الرسالة للغرفة في بلوك منفصل
         try:
             pusher_client.trigger(channel_name, event_name, data)
-            if receiver:
+        except Exception as e:
+            print(f"Pusher Chat Error: {e}")
+
+        # 🚀 2. إرسال إشعار العداد للمستلم في بلوك منفصل تماماً (لضمان وصوله)
+        if receiver:
+            try:
                 global_channel = f'private-user_{receiver.id}'
                 pusher_client.trigger(global_channel, 'new_message_notification', data)
-        except Exception as e:
-            print(f"Pusher Error: {e}")
+            except Exception as e:
+                print(f"Pusher Global Error: {e}")
 
 
 class MarkMessagesAsReadView(APIView):
@@ -142,7 +148,6 @@ class PusherAuthView(APIView):
         if not channel_name or not socket_id:
             return Response({"detail": "بيانات ناقصة"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 🚀 الحماية المطلقة ضد إيرور 403 اللي كان بيطلعلك
         if 'undefined' in channel_name or 'null' in channel_name:
             return Response({"detail": "قناة غير صالحة بسبب غياب الـ ID"}, status=status.HTTP_400_BAD_REQUEST)
 
