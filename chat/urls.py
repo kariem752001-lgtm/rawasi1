@@ -6,7 +6,10 @@ urlpatterns = [
     path('rooms/start/<int:listing_id>/', views.StartOrGetChatRoomView.as_view(), name='start-room'),
     path('rooms/<int:room_id>/messages/', views.MessageListCreateView.as_view(), name='room-messages'),
     path('rooms/<int:room_id>/read/', views.MarkMessagesAsReadView.as_view(), name='mark-messages-read'),
+    
+    # 🚀 المسار الجديد اللي هيستقبل إشعار الـ Delivered
+    path('messages/<int:message_id>/delivered/', views.MarkMessageAsDeliveredView.as_view(), name='mark-message-delivered'),
+    
     path('pusher/auth/', views.PusherAuthView.as_view(), name='pusher-auth'),
-    # 🚀 المسار الجديد لعداد الإشعارات
     path('unread-count/', views.UnreadMessageCountView.as_view(), name='unread-count'),
 ]

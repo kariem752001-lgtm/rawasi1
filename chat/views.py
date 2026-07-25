@@ -21,9 +21,6 @@ class ChatRoomListView(generics.ListAPIView):
         
 
 class StartOrGetChatRoomView(generics.GenericAPIView):
-    """
-    لو المشتري ضغط "تواصل مع البائع"، بنفتح الغرفة لو موجودة، أو نكريتها لو أول مرة
-    """
     permission_classes = [IsAuthenticated]
 
     def post(self, request, listing_id):
@@ -47,20 +44,17 @@ class MessageListCreateView(generics.ListCreateAPIView):
     serializer_class = MessageSerializer
     permission_classes = [IsAuthenticated]
     
-    # 🚀 السحر الأول: فرض إيقاف الـ Pagination حتى لو مفعل عالمياً
     pagination_class = None
 
     def get_queryset(self):
         room_id = self.kwargs['room_id']
         return Message.objects.filter(room_id=room_id).order_by('created_at')
 
-    # 🚀 السحر الثاني: إعادة تشكيل الرسايل قبل إرسالها عشان is_me تتحسب صح 100% لكل يوزر
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
         serializer = self.get_serializer(queryset, many=True)
         data = serializer.data
         
-        # بنجبر الباك إند يقول صراحة لكل يوزر الرسالة دي بتاعته ولا لأ
         for msg in data:
             msg['is_me'] = str(msg.get('sender')) == str(request.user.id)
             
@@ -76,7 +70,6 @@ class MessageListCreateView(generics.ListCreateAPIView):
         channel_name = f'private-chat_{room.id}'
         event_name = 'new_message'
         
-        # بنبعت الـ ID فقط في البوشر، والفرونت هيحدد هي بتاعته ولا لأ
         data = {
             'id': message.id,
             'content': message.content,
@@ -94,12 +87,9 @@ class MessageListCreateView(generics.ListCreateAPIView):
                 pusher_client.trigger(global_channel, 'new_message_notification', data)
         except Exception as e:
             print(f"Pusher Error: {e}")
-            
+
 
 class MarkMessagesAsReadView(APIView):
-    """
-    تحديث حالة الرسائل إلى "تمت القراءة" عند فتح المستخدم للمحادثة
-    """
     permission_classes = [IsAuthenticated]
 
     def post(self, request, room_id):
@@ -121,6 +111,29 @@ class MarkMessagesAsReadView(APIView):
                 print(f"Pusher Error: {e}")
 
         return Response({"detail": "تم تحديث حالة القراءة", "updated_count": updated_count}, status=status.HTTP_200_OK)
+
+
+# 🚀 الكلاس الجديد لإثبات وصول الرسالة للموبايل (Delivered)
+class MarkMessageAsDeliveredView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, message_id):
+        message = get_object_or_404(Message, id=message_id)
+        
+        # نتأكد إن الرسالة مش بتاعتي، وإنها لسه متعلمتش كـ Delivered
+        if message.sender != request.user and not message.is_delivered:
+            message.is_delivered = True
+            message.save()
+            
+            # نبلغ المرسل إن رسالته وصلت جهاز المستلم (عشان يرسم صحين رمادي)
+            channel_name = f'private-chat_{message.room.id}'
+            try:
+                pusher_client.trigger(channel_name, 'message_delivered', {'message_id': message.id})
+            except Exception as e:
+                print(f"Pusher Error: {e}")
+                
+        return Response({"detail": "Delivered"}, status=status.HTTP_200_OK)
+
 
 class PusherAuthView(APIView):
     permission_classes = [IsAuthenticated]
@@ -153,14 +166,10 @@ class PusherAuthView(APIView):
 
 
 class UnreadMessageCountView(APIView):
-    """
-    إرجاع عدد الرسائل غير المقروءة للمستخدم لعرضها في شريط التنقل (Navbar)
-    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         user = request.user
-        
         rooms = ChatRoom.objects.filter(Q(buyer=user) | Q(seller=user))
         
         unread_count = Message.objects.filter(
