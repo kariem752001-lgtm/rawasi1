@@ -47,10 +47,14 @@ class StartOrGetChatRoomView(generics.GenericAPIView):
 class MessageListCreateView(generics.ListCreateAPIView):
     serializer_class = MessageSerializer
     permission_classes = [IsAuthenticated]
+    
+    # 🚀 السطر السحري الأول: إغلاق الـ Pagination عشان كل الرسايل ترجع مرة واحدة
+    pagination_class = None
 
     def get_queryset(self):
         room_id = self.kwargs['room_id']
-        return Message.objects.filter(room_id=room_id)
+        # 🚀 السطر السحري التاني: ترتيب الرسايل من الأقدم للأحدث عشان تظهر صح في الفرونت
+        return Message.objects.filter(room_id=room_id).order_by('created_at')
 
     def perform_create(self, serializer):
         room = get_object_or_404(ChatRoom, id=self.kwargs['room_id'])
