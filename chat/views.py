@@ -47,49 +47,54 @@ class MessageListCreateView(generics.ListCreateAPIView):
     serializer_class = MessageSerializer
     permission_classes = [IsAuthenticated]
     
-    # إغلاق الـ Pagination عشان كل الرسايل ترجع مرة واحدة ومتمسحش في الريفريش
+    # 🚀 السحر الأول: فرض إيقاف الـ Pagination حتى لو مفعل عالمياً
     pagination_class = None
 
     def get_queryset(self):
         room_id = self.kwargs['room_id']
-        # ترتيب الرسايل من الأقدم للأحدث عشان تظهر صح في الفرونت
         return Message.objects.filter(room_id=room_id).order_by('created_at')
+
+    # 🚀 السحر الثاني: إعادة تشكيل الرسايل قبل إرسالها عشان is_me تتحسب صح 100% لكل يوزر
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        data = serializer.data
+        
+        # بنجبر الباك إند يقول صراحة لكل يوزر الرسالة دي بتاعته ولا لأ
+        for msg in data:
+            msg['is_me'] = str(msg.get('sender')) == str(request.user.id)
+            
+        return Response(data)
 
     def perform_create(self, serializer):
         room = get_object_or_404(ChatRoom, id=self.kwargs['room_id'])
-        
-        # 1. حفظ الرسالة
         message = serializer.save(sender=self.request.user, room=room)
         
-        # 2. تحديث وقت الغرفة
         room.updated_at = message.created_at
         room.save()
 
-        # 3. إرسال الرسالة للغرفة عبر Pusher
         channel_name = f'private-chat_{room.id}'
         event_name = 'new_message'
         
-        # 🚀 السحر هنا: الداتا اللي طالعة للبوشر مبقاش فيها is_me عشان منلخبطش الفرونت إند
+        # بنبعت الـ ID فقط في البوشر، والفرونت هيحدد هي بتاعته ولا لأ
         data = {
             'id': message.id,
             'content': message.content,
             'created_at': message.created_at.isoformat(),
             'is_read': message.is_read,
-            'sender': self.request.user.id  # بنبعت الـ ID فقط والفرونت هيحكم
+            'sender': self.request.user.id 
         }
         
         receiver = room.seller if self.request.user == room.buyer else room.buyer
 
         try:
             pusher_client.trigger(channel_name, event_name, data)
-            
-            # إرسال إشعار لحظي للقناة العامة بتاعت المستلم
             if receiver:
                 global_channel = f'private-user_{receiver.id}'
                 pusher_client.trigger(global_channel, 'new_message_notification', data)
-                
         except Exception as e:
             print(f"Pusher Error: {e}")
+            
 
 class MarkMessagesAsReadView(APIView):
     """
