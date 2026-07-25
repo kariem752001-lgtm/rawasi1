@@ -18,7 +18,7 @@ class ChatRoomListView(generics.ListAPIView):
         return ChatRoom.objects.filter(
             Q(buyer=user) | Q(seller=user)
         ).select_related('listing', 'buyer', 'seller').prefetch_related('messages')
-        
+
 
 class StartOrGetChatRoomView(generics.GenericAPIView):
     permission_classes = [IsAuthenticated]
@@ -30,7 +30,7 @@ class StartOrGetChatRoomView(generics.GenericAPIView):
         if not seller:
             return Response({"detail": "هذا الإعلان غير مرتبط بمالك محدد."}, status=status.HTTP_400_BAD_REQUEST)
 
-        if buyer == seller:
+        if buyer.id == seller.id:
             return Response({"detail": "لا يمكنك بدء محادثة مع نفسك!"}, status=status.HTTP_400_BAD_REQUEST)
 
         room, created = ChatRoom.objects.get_or_create(
@@ -43,7 +43,6 @@ class StartOrGetChatRoomView(generics.GenericAPIView):
 class MessageListCreateView(generics.ListCreateAPIView):
     serializer_class = MessageSerializer
     permission_classes = [IsAuthenticated]
-    
     pagination_class = None
 
     def get_queryset(self):
@@ -65,28 +64,27 @@ class MessageListCreateView(generics.ListCreateAPIView):
         message = serializer.save(sender=self.request.user, room=room)
         
         room.updated_at = message.created_at
-        room.save()
+        room.save(update_fields=['updated_at'])
 
         channel_name = f'private-chat_{room.id}'
-        event_name = 'new_message'
         
         data = {
             'id': message.id,
             'content': message.content,
             'created_at': message.created_at.isoformat(),
             'is_read': message.is_read,
+            'is_delivered': message.is_delivered,
             'sender': self.request.user.id 
         }
         
-        receiver = room.seller if self.request.user == room.buyer else room.buyer
+        # 🚀 إصلاح الفخ: استخدام .id في المقارنة لضمان تحديد المستلم الصحيح
+        receiver = room.seller if self.request.user.id == room.buyer.id else room.buyer
 
-        # 🚀 1. إرسال الرسالة للغرفة في بلوك منفصل
         try:
-            pusher_client.trigger(channel_name, event_name, data)
+            pusher_client.trigger(channel_name, 'new_message', data)
         except Exception as e:
             print(f"Pusher Chat Error: {e}")
 
-        # 🚀 2. إرسال إشعار العداد للمستلم في بلوك منفصل تماماً (لضمان وصوله)
         if receiver:
             try:
                 global_channel = f'private-user_{receiver.id}'
@@ -101,7 +99,7 @@ class MarkMessagesAsReadView(APIView):
     def post(self, request, room_id):
         room = get_object_or_404(ChatRoom, id=room_id)
         
-        if request.user not in [room.buyer, room.seller]:
+        if request.user.id not in [room.buyer.id, room.seller.id]:
             return Response({"detail": "غير مصرح لك"}, status=status.HTTP_403_FORBIDDEN)
 
         unread_messages = room.messages.exclude(sender=request.user).filter(is_read=False)
@@ -109,10 +107,8 @@ class MarkMessagesAsReadView(APIView):
 
         if updated_count > 0:
             channel_name = f'private-chat_{room.id}'
-            event_name = 'messages_read'
-            
             try:
-                pusher_client.trigger(channel_name, event_name, {'read_by': request.user.id})
+                pusher_client.trigger(channel_name, 'messages_read', {'read_by': request.user.id})
             except Exception as e:
                 print(f"Pusher Error: {e}")
 
@@ -125,9 +121,10 @@ class MarkMessageAsDeliveredView(APIView):
     def post(self, request, message_id):
         message = get_object_or_404(Message, id=message_id)
         
-        if message.sender != request.user and not message.is_delivered:
+        # 🚀 إصلاح الفخ 2: استخدام sender_id بدلاً من الكائن نفسه
+        if message.sender_id != request.user.id and not message.is_delivered:
             message.is_delivered = True
-            message.save()
+            message.save(update_fields=['is_delivered']) # تسريع قواعد البيانات
             
             channel_name = f'private-chat_{message.room.id}'
             try:
