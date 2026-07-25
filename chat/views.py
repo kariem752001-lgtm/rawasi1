@@ -178,5 +178,14 @@ class UnreadMessageCountView(APIView):
     def get(self, request):
         user = request.user
         rooms = ChatRoom.objects.filter(Q(buyer=user) | Q(seller=user))
-        unread_count = Message.objects.filter(room__in=rooms, is_read=False).exclude(sender=user).count()
-        return Response({"unread_count": unread_count}, status=status.HTTP_200_OK)
+        
+        unread_count = Message.objects.filter(
+            room__in=rooms, 
+            is_read=False
+        ).exclude(sender=user).count()
+
+        # 🚀 السحر هنا: بنجبر السيرفر يبعت الـ ID الحقيقي للمتصفح عشان يشغل بيه البوشر صح
+        return Response({
+            "unread_count": unread_count,
+            "user_id": user.id 
+        }, status=status.HTTP_200_OK)
