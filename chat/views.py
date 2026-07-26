@@ -11,10 +11,9 @@ from .serializers import ChatRoomSerializer, MessageSerializer
 from .utils import pusher_client
 from aqar.models import Listing  
 
-# 🚀 استدعاء دالة الإشعارات الجاهزة من تطبيقك
+# استدعاء دالة الإشعارات الجاهزة من تطبيقك
 from aqar_core.fcm_manager import send_push_notification
 
-# تفعيل اللوجر الاحترافي
 logger = logging.getLogger(__name__)
 
 class ChatRoomListView(generics.ListAPIView):
@@ -67,19 +66,17 @@ class MessageListCreateView(generics.ListCreateAPIView):
         return Response(data)
 
     def perform_create(self, serializer):
-        # 🚀 تحسين الأداء: استخدام select_related لمنع N+1 Queries
+        # تحسين الأداء: استخدام select_related لمنع N+1 Queries
         room = get_object_or_404(
             ChatRoom.objects.select_related('buyer', 'seller'), 
             id=self.kwargs['room_id']
         )
         
         message = serializer.save(sender=self.request.user, room=room)
-        
         room.updated_at = message.created_at
         room.save(update_fields=['updated_at'])
 
         channel_name = f'private-chat_{room.id}'
-        
         data = {
             'id': message.id,
             'content': message.content,
@@ -107,17 +104,12 @@ class MessageListCreateView(generics.ListCreateAPIView):
             except Exception as e:
                 logger.error(f"Pusher Global Error: {e}")
 
-            # 🚀 3. إرسال إشعار Firebase للمستلم (Native Push Notification)
+            # 3. إرسال إشعار Firebase للمستلم (Native Push Notification)
             try:
-                # محاولة جلب الاسم الكامل، ولو مفيش نجيب اليوزر نيم
                 sender_name = self.request.user.get_full_name() or self.request.user.username
-                
-                # تقصير نص الرسالة لو طويل جداً عشان الإشعار يبقى شكله حلو
                 msg_body = message.content[:50] + "..." if len(message.content) > 50 else message.content
-                
                 chat_link = f"/chat/{room.id}"
                 
-                # استدعاء دالتك الجاهزة (بتشتغل في الـ Background)
                 send_push_notification(
                     user=receiver,
                     title=f"رسالة جديدة من {sender_name}",
@@ -133,7 +125,6 @@ class MarkMessagesAsReadView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, room_id):
-        # 🚀 تحسين الأداء بـ select_related
         room = get_object_or_404(
             ChatRoom.objects.select_related('buyer', 'seller'), 
             id=room_id
@@ -159,7 +150,6 @@ class MarkMessageAsDeliveredView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, message_id):
-        # 🚀 جلب الرسالة مع الغرفة في استعلام واحد
         message = get_object_or_404(
             Message.objects.select_related('room'), 
             id=message_id
@@ -227,3 +217,16 @@ class UnreadMessageCountView(APIView):
             "unread_count": unread_count,
             "user_id": user.id 
         }, status=status.HTTP_200_OK)
+
+
+# 🚀 المسار الجديد المخصص لاستقبال وحفظ توكن الفايربيز
+class UpdateFCMTokenView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        token = request.data.get('fcm_token')
+        if token:
+            request.user.fcm_token = token
+            request.user.save(update_fields=['fcm_token'])
+            return Response({"detail": "FCM Token updated successfully"}, status=status.HTTP_200_OK)
+        return Response({"detail": "Token is missing"}, status=status.HTTP_400_BAD_REQUEST)
