@@ -1,13 +1,21 @@
+import logging
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
+from rest_framework.views import APIView
+
 from .models import ChatRoom, Message
 from .serializers import ChatRoomSerializer, MessageSerializer
 from .utils import pusher_client
 from aqar.models import Listing  
-from rest_framework.views import APIView
+
+# 🚀 استدعاء دالة الإشعارات الجاهزة من تطبيقك
+from aqar_core.fcm_manager import send_push_notification
+
+# تفعيل اللوجر الاحترافي
+logger = logging.getLogger(__name__)
 
 class ChatRoomListView(generics.ListAPIView):
     serializer_class = ChatRoomSerializer
@@ -27,6 +35,7 @@ class StartOrGetChatRoomView(generics.GenericAPIView):
         listing = get_object_or_404(Listing, id=listing_id)
         buyer = request.user
         seller = listing.agent
+        
         if not seller:
             return Response({"detail": "هذا الإعلان غير مرتبط بمالك محدد."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -58,7 +67,12 @@ class MessageListCreateView(generics.ListCreateAPIView):
         return Response(data)
 
     def perform_create(self, serializer):
-        room = get_object_or_404(ChatRoom, id=self.kwargs['room_id'])
+        # 🚀 تحسين الأداء: استخدام select_related لمنع N+1 Queries
+        room = get_object_or_404(
+            ChatRoom.objects.select_related('buyer', 'seller'), 
+            id=self.kwargs['room_id']
+        )
+        
         message = serializer.save(sender=self.request.user, room=room)
         
         room.updated_at = message.created_at
@@ -71,36 +85,59 @@ class MessageListCreateView(generics.ListCreateAPIView):
             'content': message.content,
             'created_at': message.created_at.isoformat(),
             'is_read': message.is_read,
-            'is_delivered': getattr(message, 'is_delivered', False), # تأمين لو الحقل مش موجود
+            'is_delivered': getattr(message, 'is_delivered', False), 
             'sender': self.request.user.id 
         }
         
-        # 🚀 تأمين مقارنة الـ IDs بتحويلهم لنصوص عشان ميفوتش المستلم
         current_id = str(self.request.user.id)
         buyer_id = str(room.buyer.id)
         receiver = room.seller if current_id == buyer_id else room.buyer
 
-        print(f"🔥 DEBUG BACKEND: Sender={current_id}, Receiver={receiver.id}")
-
+        # 1. إرسال الإشعار اللحظي للشات المفتوح (Pusher)
         try:
             pusher_client.trigger(channel_name, 'new_message', data)
         except Exception as e:
-            print(f"Pusher Chat Error: {e}")
+            logger.error(f"Pusher Chat Error: {e}")
 
         if receiver:
+            # 2. إرسال إشعار العداد اللحظي (Pusher)
             try:
                 global_channel = f'private-user_{receiver.id}'
-                print(f"🔥 DEBUG BACKEND: Triggering Notification to {global_channel}")
                 pusher_client.trigger(global_channel, 'new_message_notification', data)
             except Exception as e:
-                print(f"Pusher Global Error: {e}")
+                logger.error(f"Pusher Global Error: {e}")
+
+            # 🚀 3. إرسال إشعار Firebase للمستلم (Native Push Notification)
+            try:
+                # محاولة جلب الاسم الكامل، ولو مفيش نجيب اليوزر نيم
+                sender_name = self.request.user.get_full_name() or self.request.user.username
+                
+                # تقصير نص الرسالة لو طويل جداً عشان الإشعار يبقى شكله حلو
+                msg_body = message.content[:50] + "..." if len(message.content) > 50 else message.content
+                
+                chat_link = f"/chat/{room.id}"
+                
+                # استدعاء دالتك الجاهزة (بتشتغل في الـ Background)
+                send_push_notification(
+                    user=receiver,
+                    title=f"رسالة جديدة من {sender_name}",
+                    body=msg_body,
+                    link=chat_link
+                )
+                logger.info(f"Firebase FCM Triggered for User {receiver.id}")
+            except Exception as e:
+                logger.error(f"Firebase FCM Error: {e}")
 
 
 class MarkMessagesAsReadView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, room_id):
-        room = get_object_or_404(ChatRoom, id=room_id)
+        # 🚀 تحسين الأداء بـ select_related
+        room = get_object_or_404(
+            ChatRoom.objects.select_related('buyer', 'seller'), 
+            id=room_id
+        )
         
         if str(request.user.id) not in [str(room.buyer.id), str(room.seller.id)]:
             return Response({"detail": "غير مصرح لك"}, status=status.HTTP_403_FORBIDDEN)
@@ -113,7 +150,7 @@ class MarkMessagesAsReadView(APIView):
             try:
                 pusher_client.trigger(channel_name, 'messages_read', {'read_by': request.user.id})
             except Exception as e:
-                pass
+                logger.error(f"Pusher Read Status Error: {e}")
 
         return Response({"detail": "تم", "updated_count": updated_count}, status=status.HTTP_200_OK)
 
@@ -122,7 +159,11 @@ class MarkMessageAsDeliveredView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, message_id):
-        message = get_object_or_404(Message, id=message_id)
+        # 🚀 جلب الرسالة مع الغرفة في استعلام واحد
+        message = get_object_or_404(
+            Message.objects.select_related('room'), 
+            id=message_id
+        )
         
         if str(message.sender_id) != str(request.user.id):
             if hasattr(message, 'is_delivered') and not message.is_delivered:
@@ -132,11 +173,8 @@ class MarkMessageAsDeliveredView(APIView):
                 channel_name = f'private-chat_{message.room.id}'
                 try:
                     pusher_client.trigger(channel_name, 'message_delivered', {'message_id': message.id})
-                    print(f"🔥 DEBUG BACKEND: Delivered event sent to {channel_name}")
                 except Exception as e:
-                    print(f"Pusher Error: {e}")
-            else:
-                 print("🔥 DEBUG BACKEND: is_delivered not found in DB or already delivered")
+                    logger.error(f"Pusher Delivered Error: {e}")
                 
         return Response({"detail": "Delivered"}, status=status.HTTP_200_OK)
 
@@ -169,6 +207,7 @@ class PusherAuthView(APIView):
             auth = pusher_client.authenticate(channel=channel_name, socket_id=socket_id)
             return Response(auth, status=status.HTTP_200_OK)
         except Exception as e:
+            logger.error(f"Pusher Auth Error: {e}")
             return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -184,7 +223,6 @@ class UnreadMessageCountView(APIView):
             is_read=False
         ).exclude(sender=user).count()
 
-        # 🚀 السحر هنا: بنجبر السيرفر يبعت الـ ID الحقيقي للمتصفح عشان يشغل بيه البوشر صح
         return Response({
             "unread_count": unread_count,
             "user_id": user.id 
